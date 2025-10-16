@@ -9,9 +9,6 @@ script_dir = os.path.dirname(os.path.abspath(__file__))
 csv_path = os.path.join(script_dir, "MetObjects.csv")
 df = pd.read_csv(csv_path, low_memory=False)
 
-#Filter rows where "Artist Display Name" is not empty or NaN
-#df_filtered = df[df["Artist Display Name"].notna() & (df["Artist Display Name"] != "")]
-
 #Filter subset of data for testing, 5000 pieces
 df_sample = df.sample(n=5000, random_state=42)
     
