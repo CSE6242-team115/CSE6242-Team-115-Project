@@ -44,12 +44,13 @@ for _, row in df_sample.iterrows():
                        medium=row['Medium'],
                        culture=row['Culture'])
 
-#print(df_sample)
-node_id = "1975.1.1989"
+node, degree = max(mlNetwork.degree(), key=lambda x: x[1])
+
+node_id = "C.I.46.28.2"
 print(f"Node: {node_id}")
 print("Attributes:", mlNetwork.nodes[node_id])
 print("Degree:", mlNetwork.degree(node_id))
 print("Neighbors:", list(mlNetwork.neighbors(node_id))[:10])
 edges = mlNetwork.edges(node_id, data=True)
-for u, v, data in edges:
-    print(f"{u} -- {v}, layer: {data.get('layer')}")
+#for u, v, data in edges:
+#    print(f"{u} -- {v}, layer: {data.get('layer')}")
