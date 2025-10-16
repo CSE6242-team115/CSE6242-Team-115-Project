@@ -41,9 +41,6 @@ for col in cols:
     colNets[f"{col_no_space}Net"] = buildNetwork(col, df_sample)
 
 
-
-
-
 mlNetwork = nx.MultiGraph()
 mlNetwork = nx.compose_all(list(colNets.values()))
 
