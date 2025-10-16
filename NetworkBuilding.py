@@ -43,6 +43,7 @@ for _, row in df_sample.iterrows():
 
 node, degree = max(mlNetwork.degree(), key=lambda x: x[1])
 
+#test code
 node_id = "C.I.46.28.2"
 print(f"Node: {node_id}")
 print("Attributes:", mlNetwork.nodes[node_id])
