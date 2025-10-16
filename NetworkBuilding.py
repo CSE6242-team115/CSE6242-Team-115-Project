@@ -16,7 +16,7 @@ df = pd.read_csv(csv_path, low_memory=False)
 df_sample = df.sample(n=5000, random_state=42)
     
 #Function to build network
-def buildNetwork(col_name: str, df: df):
+def buildNetwork(col_name: str, df):
     #Initialize network
     network = nx.MultiGraph()
 
