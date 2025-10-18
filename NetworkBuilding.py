@@ -11,17 +11,48 @@ df = pd.read_csv(csv_path, low_memory=False)
 
 #Filter subset of data for testing, 5000 pieces
 df_sample = df.sample(n=5000, random_state=42)
+
+#Data Cleaning to separate piped text
+piped_cols = [
+    'Artist Display Name', 'Artist Nationality', 'City', 'State',
+    'County', 'Country', 'Region', 'Subregion', 'Locale', 'Tags'
+]
+
+for col in piped_cols:
+    if col in df_sample.columns:
+        df_sample[col] = (
+            df_sample[col]
+            .fillna('')
+            .apply(lambda x: [v.strip() for v in str(x).split('|') if v.strip()])
+        )
     
-#Function to build network
-def buildNetwork(col_name: str, df):
+#Function to build network, Needed to update this to handle lists from pipe data cleaning
+#max_apps = max appearances of a single connector/value. Skips over potential connectors to keep the size of graph feasible. 
+def buildNetwork(col_name: str, df, max_apps=5000):
     #Initialize network
     network = nx.MultiGraph()
+    value_to_objects = defaultdict(list)
 
-    for _, group in df.groupby(col_name):
-        artworks = list(group['Object Number'])
-        if len(artworks) > 1:
-            for a, b in combinations(artworks, 2):
-                network.add_edge(a, b, layer=col_name)
+    col_idx = df.columns.get_loc(col_name)
+    obj_idx = df.columns.get_loc("Object Number")
+    
+    for row in df.itertuples(index=False):
+        obj = row[obj_idx]
+        values = row[col_idx]
+        if not isinstance(values, list):
+            values = [str(values).strip()] if str(values).strip() else []
+        for v in values:
+            value_to_objects[v].append(obj)
+    
+    # Build edges
+    for objs in value_to_objects.values():
+        if len(objs) > 1 and len(objs) <= max_apps:
+            network.add_edges_from(
+                ((a, b, {'layer': col_name}) for a, b in combinations(objs, 2))
+            )
+        elif len(objs) > max_apps:
+            continue
+    
     return network
 
 # build networks for each column/category
@@ -41,7 +72,7 @@ for col in cols:
     colNets[f"{col_no_space}Net"] = buildNetwork(col, df_sample)
 
 
-mlNetwork = nx.MultiGraph()
+#mlNetwork = nx.MultiGraph()
 mlNetwork = nx.compose_all(list(colNets.values()))
 
 #add node attributes for all selected columns
@@ -53,7 +84,7 @@ for _, row in df_sample.iterrows():
 node, degree = max(mlNetwork.degree(), key=lambda x: x[1])
 
 #tester code
-node_id = "C.I.46.28.2"
+node_id = node
 print(f"Node: {node_id}")
 print("Attributes:", mlNetwork.nodes[node_id])
 print("Degree:", mlNetwork.degree(node_id))
