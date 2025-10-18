@@ -28,7 +28,7 @@ for col in piped_cols:
     
 #Function to build network, Needed to update this to handle lists from pipe data cleaning
 #max_apps = max appearances of a single connector/value. Skips over potential connectors to keep the size of graph feasible. 
-def buildNetwork(col_name: str, df, max_apps=5000):
+def buildNetwork(col_name: str, df, max_apps=1000):
     #Initialize network
     network = nx.MultiGraph()
     value_to_objects = defaultdict(list)
