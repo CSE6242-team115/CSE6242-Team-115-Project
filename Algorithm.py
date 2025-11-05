@@ -67,6 +67,7 @@ output_data = []
 for idx, row in df.iterrows():
     output_data.append({
         "index": idx,
+        "object_number": row.Object_Number,
         "title": row.Title,
         "artist": row.Artist_Display_Name,
         "medium": row.Medium,
