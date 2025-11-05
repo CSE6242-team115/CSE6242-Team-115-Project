@@ -1,10 +1,12 @@
 import os
 import pandas as pd
+import json
 
 # Load Data
 script_dir = os.path.dirname(os.path.abspath(__file__))
 df = pd.read_csv(os.path.join(script_dir, "MetObjects.csv"), low_memory = False)
 df.columns = df.columns.str.replace(" ", "_")
+df = df.sample(n=5000, random_state=42)
 
 # Filter relevant columns
 cols = ["Artist Display Name", "Object Date", "Medium", "Culture", "Object Number", "Department",
@@ -44,23 +46,36 @@ for col in attr_cols:
 
 # find indices of similar pieces for each piece
 index_list = []
-all_indices = set()
+all_indices = dict()
 for row in df.itertuples():
-    print(row)
+    idx= row.Index
+    single_index = set()
     for col in attr_cols:
         val = getattr(row, col)
         if col in piped_cols:
             if len(val) == 0:
                 continue
             for v in val:
-                index_list.append(attr_dict[col][v])
-                all_indices.update(attr_dict[col][v])
+                single_index.update(attr_dict[col][v])
         else:
-            if pd.isna(val):
-                continue
-            index_list.append(attr_dict[col][val])
-            all_indices.update(attr_dict[col][val])
-    break
-print(index_list)
-print()
-print(all_indices)
+            if pd.notna(val):
+                single_index.update(attr_dict[col][val])
+    single_index.discard(idx)
+    all_indices[idx] = list(single_index)
+
+output_data = []
+for idx, row in df.iterrows():
+    output_data.append({
+        "index": idx,
+        "title": row.Title,
+        "artist": row.Artist_Display_Name,
+        "medium": row.Medium,
+        "culture": row.Culture,
+        "object_date": row.Object_Date,
+        "similar_indices": all_indices[idx]
+    })
+
+# Save to JSON file for web integration
+output_path = os.path.join(script_dir, "full_artworks.json")
+with open(output_path, "w", encoding="utf-8") as f:
+    json.dump(output_data, f, ensure_ascii=False, indent=2)
