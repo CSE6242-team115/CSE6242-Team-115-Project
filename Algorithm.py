@@ -4,7 +4,7 @@ import json
 
 # Load Data
 script_dir = os.path.dirname(os.path.abspath(__file__))
-df = pd.read_csv(os.path.join(script_dir, "MetObjects.csv"), low_memory = False)
+df = pd.read_csv(os.path.join(script_dir, "MetObjects-Cleaned_Columns-csv_v2.csv"), low_memory = False)
 df.columns = df.columns.str.replace(" ", "_")
 df = df.sample(n=5000, random_state=42)
 
