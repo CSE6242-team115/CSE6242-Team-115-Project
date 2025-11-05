@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <title>Met Objects — Similarity Star (JSON index, score-sized)</title>
+  <style>
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; }
+    header { padding: 12px 16px; background: #f6f8fa; border-bottom: 1px solid #e5e7eb; display:flex; gap:8px; align-items:center; flex-wrap: wrap; }
+    input[type="text"] { padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 8px; width: 420px; }
+    button { padding: 8px 12px; border: 1px solid #d1d5db; background: white; border-radius: 8px; cursor: pointer; }
+    button:hover { background: #f3f4f6; }
+    .hint { color:#6b7280; font-size: 12px; margin-left: 6px; }
+    svg { display:block; background:white; overflow: visible; }
+
+    path.link { fill: none; stroke: #9ca3af; stroke-width: 1.5px; opacity: 0.85; }
+    g.node text { fill: #111827; font: 11px/1.2 sans-serif; pointer-events: none; text-anchor: middle; }
+    g.node circle { stroke: #374151; stroke-width: 1px; }
+
+    #info {
+      position: fixed; right: 16px; top: 64px; width: 360px; max-height: 75vh; overflow:auto;
+      background: #ffffff; border:1px solid #e5e7eb; border-radius: 12px; padding: 12px 14px; box-shadow: 0 6px 18px rgba(0,0,0,0.08);
+      font-size: 13px;
+    }
+    #info h3 { margin: 0 0 6px 0; font-size: 15px; }
+    #info .k { color:#6b7280; }
+    #legend { position: fixed; left: 16px; top: 64px; background: #ffffff; border:1px solid #e5e7eb; border-radius: 8px; padding: 8px 10px; font-size:12px; }
+  </style>
+  <script src="https://d3js.org/d3.v5.min.js" defer></script>
+</head>
+<body>
+  <header>
+    <label for="mainObj"><strong>Main Object Number:</strong></label>
+    <input id="mainObj" type="text" list="objList" placeholder="Search or paste an Object Number…" />
+    <datalist id="objList"></datalist>
+    <button id="buildBtn">Build graph</button>
+    <span class="hint">Circle size = similarity score with the main item.</span>
+  </header>
+
+  <div id="legend">Score-sized neighbors; pan/zoom enabled. Nodes auto-fit into view.</div>
+  <div id="info">Click a node to see details here.</div>
+
+  <script>
+  document.addEventListener("DOMContentLoaded", function () {
+    const width = Math.min(window.innerWidth, 1200);
+    const height = 760;
+
+    // Data files next to this HTML
+    const csvPath  = "MetObjects-Cleaned-5000sample.csv";
+    const jsonPath = "full_artworks2.json";
+
+    // CSV columns to show in the detail panel (match CSV headers)
+    const columns = [
+      "Object Number","Object ID","Gallery Number","Department","AccessionYear",
+      "Object Name","Title","Culture","Period","Dynasty","Reign","Portfolio",
+      "Artist Nationality","Object Begin Date","Object End Date","City","State","County",
+      "Country","Region","Subregion","Locale","Classification","Tags"
+    ];
+
+    const svg = d3.select("body").append("svg")
+      .attr("width", width)
+      .attr("height", height);
+
+    const gRoot  = svg.append("g").attr("class","root");
+    const gLinks = gRoot.append("g").attr("class","links");
+    const gNodes = gRoot.append("g").attr("class","nodes");
+
+    const zoom = d3.zoom().scaleExtent([0.4, 4]).on("zoom", () => {
+      gRoot.attr("transform", d3.event.transform);
+    });
+    svg.call(zoom).call(zoom.transform, d3.zoomIdentity);
+
+    const info = d3.select("#info");
+
+    // Helpers
+    const norm = v => {
+      if (v === undefined || v === null) return null;
+      const s = String(v).trim();
+      if (!s || s.toLowerCase() === "null" || s.toLowerCase() === "nan") return null;
+      return s;
+    };
+    const canon = v => {
+      if (v == null) return null;
+      return String(v)
+        .normalize('NFKC')
+        .replace(/[\u200B-\u200D\uFEFF]/g, '')
+        .replace(/\s+/g, ' ')
+        .trim();
+    };
+    const canonLower = v => {
+      const c = canon(v);
+      return c == null ? null : c.toLowerCase();
+    };
+
+    // Data caches
+    let csvRows = [];                     // raw rows from CSV
+    let objToRow = new Map();             // canonical-lower object number -> row
+    let idxToRow = new Map();             // numeric index (from CSV index col) -> row
+    let indexColName = null;              // detected CSV index column name
+    let recsMap = {};                     // object_number -> { index, ..., similar_neighbors_scored: [{index,score},...] }
+
+    // Load CSV then JSON
+    d3.csv(csvPath).then(rows => {
+      csvRows = rows;
+
+      // Detect the "index" column that pandas wrote (e.g., "index" or "Unnamed: 0")
+      const headers = rows.length ? Object.keys(rows[0]) : [];
+      indexColName =
+        headers.find(h => h.toLowerCase() === "index") ||
+        headers.find(h => /^unnamed/i.test(h)) ||
+        null;
+
+      if (!indexColName) {
+        console.warn("Could not detect index column in CSV; falling back to row order.");
+      }
+
+      // Build maps: object number -> row, and index -> row
+      objToRow.clear();
+      idxToRow.clear();
+
+      rows.forEach(r => {
+        const obj = canonLower(r["Object Number"]);
+        if (obj && !objToRow.has(obj)) objToRow.set(obj, r);
+
+        const idx = indexColName ? Number(r[indexColName]) : null;
+        if (indexColName && Number.isFinite(idx) && !idxToRow.has(idx)) {
+          idxToRow.set(idx, r);
+        }
+      });
+
+      // Populate datalist (Object Number — Title)
+      const options = Array.from(objToRow.values());
+      const dl = d3.select("#objList");
+      dl.selectAll("option").remove();
+      dl.selectAll("option")
+        .data(options)
+        .enter()
+        .append("option")
+        .attr("value", d => canon(d["Object Number"]))
+        .attr("label", d => `${canon(d["Object Number"]) || ''} — ${canon(d.Title) || '(Untitled)'}`)
+        .text(d => `${canon(d["Object Number"]) || ''} — ${canon(d.Title) || '(Untitled)'}`);
+
+      const firstObjNo = options[0]?.["Object Number"] || "";
+      d3.select("#mainObj").property("value", firstObjNo);
+
+      // Now load the JSON recommendations
+      return d3.json(jsonPath);
+    }).then(jsonData => {
+        recsMap = jsonData || {};
+
+  // Build fast lookup maps based on JSON keys (object numbers)
+  const jsonKeys = Object.keys(recsMap);
+  // exact→exact
+  const jsonKeySet = new Set(jsonKeys);
+  // trimmed→original
+  const jsonKeyTrimMap  = new Map(jsonKeys.map(k => [k.trim(), k]));
+  // trimmed+lower→original (fallback)
+  const jsonKeyLowerMap = new Map(jsonKeys.map(k => [k.trim().toLowerCase(), k]));
+
+  // Build the datalist from JSON keys (authoritative)
+  const dl = d3.select("#objList");
+  dl.selectAll("option").remove();
+  dl.selectAll("option")
+    .data(jsonKeys)
+    .enter()
+    .append("option")
+    .attr("value", d => d)
+    .attr("label", d => {
+      // Try to show Title from CSV if we can resolve it
+      const row = objToRow.get((d || "").toLowerCase().trim());
+      const title = row ? (row["Title"] || "(Untitled)") : "(from JSON)";
+      return `${d} — ${title}`;
+    })
+    .text(d => d);
+
+  // Pre-fill input with first JSON key if empty
+  if (!d3.select("#mainObj").property("value") && jsonKeys.length) {
+    d3.select("#mainObj").property("value", jsonKeys[0]);
+  }
+
+  // Stash the maps for buildGraph
+  window.__jsonKeyTrimMap  = jsonKeyTrimMap;
+  window.__jsonKeyLowerMap = jsonKeyLowerMap;
+
+  console.log(`[Similarity Star] Loaded CSV rows: ${csvRows.length}, JSON keys: ${jsonKeys.length}`);
+    }).catch(err => {
+      console.error("Data load error:", err);
+      info.html("<b>Could not load data.</b> Start a local server (e.g., <code>python3 -m http.server 8000</code>) and ensure the CSV and JSON are next to this HTML.");
+    });
+
+    d3.select("#buildBtn").on("click", () => {
+      const objInput = d3.select("#mainObj").property("value") || "";
+      buildGraph(objInput);
+    });
+    d3.select("#mainObj").on("keydown", function() {
+      if (d3.event.key === "Enter") {
+        const objInput = d3.select("#mainObj").property("value") || "";
+        buildGraph(objInput);
+      }
+    });
+
+    function buildGraph(mainObjRaw) {
+      gLinks.selectAll("*").remove();
+      gNodes.selectAll("*").remove();
+      svg.call(zoom).call(zoom.transform, d3.zoomIdentity);
+
+      const typed = (mainObjRaw || "").toString();
+      const trimmed = typed.trim();
+      const lowered = trimmed.toLowerCase();
+
+      // 1) exact key match in JSON
+      let key = (recsMap.hasOwnProperty(typed)) ? typed : null;
+      // 2) trimmed match
+      if (!key && window.__jsonKeyTrimMap && window.__jsonKeyTrimMap.has(trimmed)) {
+        key = window.__jsonKeyTrimMap.get(trimmed);
+      }
+      // 3) lowercased trimmed match (fallback)
+      if (!key && window.__jsonKeyLowerMap && window.__jsonKeyLowerMap.has(lowered)) {
+        key = window.__jsonKeyLowerMap.get(lowered);
+      }
+
+      if (!key) {
+        info.html(`<b>No JSON record found for:</b> "${typed}".<br/>Ensure the exact key exists in <code>full_artworks2.json</code>.`);
+        return;
+      }
+
+      const rec = recsMap[key];
+
+      // Resolve CSV row for richer metadata (using the exact JSON key string)
+      const mainRow = objToRow.get(key.toLowerCase().trim());
+      if (!mainRow) {
+        info.html(`<b>CSV row not found for:</b> "${key}".<br/>Check that the CSV contains this Object Number.`);
+        return;
+      }
+
+      // Use scored neighbors if present; else fallback to indices with score=1
+      let neighbors = [];
+      if (Array.isArray(rec.similar_neighbors_scored) && rec.similar_neighbors_scored.length) {
+        neighbors = rec.similar_neighbors_scored
+          .map(d => ({ index: +d.index, score: +d.score }))
+          .filter(d => Number.isFinite(d.index));
+      } else if (Array.isArray(rec.similar_indices)) {
+        neighbors = rec.similar_indices
+          .map(i => ({ index: +i, score: 1 }))
+          .filter(d => Number.isFinite(d.index));
+      }
+
+      const neighborRows = neighbors
+        .map(n => ({ row: idxToRow.get(n.index), score: n.score, index: n.index }))
+        .filter(x => !!x.row);
+
+      if (!neighborRows.length) {
+        info.html(`<b>No neighbors found</b> for "${key}" in JSON.`);
+      }
+
+      // Build nodes & links (size by score)
+      const nodes = [];
+      const links = [];
+
+      const mainId = key;  // use exact object-number string as the node id
+      nodes.push({
+        id: mainId,
+        title: norm(mainRow["Title"]) || "(Untitled)",
+        row: mainRow,
+        main: true,
+        score: 0
+      });
+
+      neighborRows.forEach(({ row, score, index }) => {
+        const id = norm(row["Object Number"]) || `idx_${index}`;
+        nodes.push({
+          id,
+          title: norm(row["Title"]) || "(Untitled)",
+          row,
+          main: false,
+          score: +score || 0.0001,
+          index
+        });
+        links.push({ source: mainId, target: id, value: +score || 1 });
+      });
+
+      // Size & color scales from scores
+      const scores = neighborRows.map(n => +n.score).filter(Number.isFinite);
+      const sMin = scores.length ? Math.min(...scores) : 1;
+      const sMax = scores.length ? Math.max(...scores) : 1;
+      const rScale = d3.scaleSqrt().domain([sMin, sMax]).range([12, 46]);
+      const color = d3.scaleSequential().domain([sMin, sMax])
+        .interpolator(d3.interpolateHsl("hsl(210,70%,90%)", "hsl(210,90%,30%)"));
+
+      const sim = d3.forceSimulation(nodes)
+        .force("link", d3.forceLink(links).id(d => d.id).distance(240).strength(0.8))
+        .force("charge", d3.forceManyBody().strength(-800))
+        .force("center", d3.forceCenter(width/2, height/2))
+        .force("collide", d3.forceCollide().radius(d => (d.main ? 52 : rScale(d.score) + 16)).iterations(2))
+        .alpha(1)
+        .alphaTarget(0.2)
+        .on("tick", ticked)
+        .on("end", () => fitToView(70));
+
+      const mainNode = nodes.find(n => n.main);
+      if (mainNode) { mainNode.fx = width / 2; mainNode.fy = height / 2; }
+
+      gLinks.selectAll("path.link")
+        .data(links)
+        .enter()
+        .append("path")
+        .attr("class", "link")
+        .append("title")
+        .text(d => `Similarity score: ${d.value}`);
+
+      const node = gNodes.selectAll("g.node")
+        .data(nodes)
+        .enter()
+        .append("g")
+        .attr("class", "node")
+        .call(d3.drag()
+          .on("start", dragstarted)
+          .on("drag", dragged)
+          .on("end", dragended))
+        .on("click", showDetails);
+
+      node.append("circle")
+        .attr("r", d => d.main ? 52 : rScale(d.score))
+        .style("fill", d => d.main ? "#ffb4c2" : color(d.score))
+        .style("stroke-width", d => d.main ? 2 : 1.2);
+
+      node.append("text")
+        .attr("dy", d => (d.main ? 52 : rScale(d.score)) + 14)
+        .text(d => d.title)
+        .style("font-weight", d => d.main ? "700" : "500");
+
+      function ticked() {
+        const pad = 60;
+        nodes.forEach(d => {
+          d.x = Math.max(pad, Math.min(width - pad, d.x));
+          d.y = Math.max(pad, Math.min(height - pad, d.y));
+        });
+        gLinks.selectAll("path.link").attr("d", d => `M${d.source.x},${d.source.y} L${d.target.x},${d.target.y}`);
+        gNodes.selectAll("g.node").attr("transform", d => `translate(${d.x},${d.y})`);
+      }
+
+      function fitToView(padding = 50) {
+        try {
+          const bbox = gRoot.node().getBBox();
+          if (!isFinite(bbox.x) || !isFinite(bbox.width) || bbox.width === 0 || bbox.height === 0) return;
+          const scale = Math.min(width / (bbox.width + padding * 2), height / (bbox.height + padding * 2));
+          const tx = width / 2 - (bbox.x + bbox.width / 2) * scale;
+          const ty = height / 2 - (bbox.y + bbox.height / 2) * scale;
+          svg.transition().duration(600).call(zoom.transform, d3.zoomIdentity.translate(tx, ty).scale(scale));
+        } catch (e) {}
+      }
+
+      function dragstarted(d) {
+        if (d.main) return;
+        if (!d3.event.active) sim.alphaTarget(0.3).restart();
+        d.fx = d.x; d.fy = d.y;
+      }
+      function dragged(d) {
+        if (d.main) return;
+        d.fx = d3.event.x; d.fy = d3.event.y;
+      }
+      function dragended(d) {
+        if (d.main) { d.fx = width/2; d.fy = height/2; return; }
+        if (!d3.event.active) sim.alphaTarget(0);
+        d.fx = d.x; d.fy = d.y;
+      }
+
+      function showDetails(d) {
+        const row = d.row || {};
+        const nonNullPairs = [];
+        columns.forEach(c => {
+          const v = norm(row[c]);
+          if (v !== null) nonNullPairs.push([c, v]);
+        });
+
+        info.html("");
+        info.append("h3").text((row["Title"] || "(Untitled)") + (d.main ? " (Main)" : ""));
+        if (!d.main && Number.isFinite(d.score)) {
+          info.append("div").style("margin","4px 0 8px 0")
+              .html(`<b>Similarity score:</b> ${d.score.toFixed(3)}`);
+        } else if (d.main) {
+          info.append("div").style("margin","4px 0 8px 0")
+              .html(`<b>Main node pinned at center.</b>`);
+        }
+        const dl = info.append("div");
+        nonNullPairs.forEach(([k, v]) => {
+          const line = dl.append("div").style("margin","2px 0");
+          line.append("span").attr("class","k").text(k + ": ");
+          line.append("span").text(v);
+        });
+        if (nonNullPairs.length === 0) {
+          info.append("div").text("No non-null fields to display.");
+        }
+      }
+    }
+  });
+  </script>
+</body>
+</html>
