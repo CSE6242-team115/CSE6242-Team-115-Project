@@ -181,57 +181,57 @@ print(f"Wrote sampled CSV         -> {sample_csv_path}")
 
 # ---------- Ask for Object Number and export top-20 CSV ----------
 # Accept as CLI arg or interactive input
-if len(sys.argv) > 1:
-    obj_key = " ".join(sys.argv[1:]).strip()
-else:
-    obj_key = input("\nEnter Object Number exactly as in JSON (e.g., 2011.604.1.4597): ").strip()
+# if len(sys.argv) > 1:
+#     obj_key = " ".join(sys.argv[1:]).strip()
+# else:
+#     obj_key = input("\nEnter Object Number exactly as in JSON (e.g., 2011.604.1.4597): ").strip()
 
-if not obj_key:
-    print("No object number provided; exiting.")
-    sys.exit(0)
+# if not obj_key:
+#     print("No object number provided; exiting.")
+#     sys.exit(0)
 
-if obj_key not in clean_output:
-    # Try trimmed match fallback (in case of accidental whitespace)
-    trimmed_map = {k.strip(): k for k in clean_output.keys()}
-    if obj_key.strip() in trimmed_map:
-        obj_key = trimmed_map[obj_key.strip()]
-    else:
-        print(f'Object Number "{obj_key}" not found in {os.path.basename(json_path)}')
-        sys.exit(1)
+# if obj_key not in clean_output:
+#     # Try trimmed match fallback (in case of accidental whitespace)
+#     trimmed_map = {k.strip(): k for k in clean_output.keys()}
+#     if obj_key.strip() in trimmed_map:
+#         obj_key = trimmed_map[obj_key.strip()]
+#     else:
+#         print(f'Object Number "{obj_key}" not found in {os.path.basename(json_path)}')
+#         sys.exit(1)
 
-rec = clean_output[obj_key]
-main_idx = int(rec["index"])
+# rec = clean_output[obj_key]
+# main_idx = int(rec["index"])
 
-# Build neighbor list (indices + score)
-neighbors = rec.get("similar_neighbors_scored", []) or []
-neighbor_indices = []
-score_map = {}
-for item in neighbors:
-    try:
-        nidx = int(item["index"])
-        neighbor_indices.append(nidx)
-        score_map[nidx] = float(item.get("score", 0.0))
-    except Exception:
-        continue
+# # Build neighbor list (indices + score)
+# neighbors = rec.get("similar_neighbors_scored", []) or []
+# neighbor_indices = []
+# score_map = {}
+# for item in neighbors:
+#     try:
+#         nidx = int(item["index"])
+#         neighbor_indices.append(nidx)
+#         score_map[nidx] = float(item.get("score", 0.0))
+#     except Exception:
+#         continue
 
-# Filter to indices that actually exist in df
-existing_neighbors = [i for i in neighbor_indices if i in df.index]
+# # Filter to indices that actually exist in df
+# existing_neighbors = [i for i in neighbor_indices if i in df.index]
 
-# Assemble output frame: main first, then neighbors
-rows_order = [main_idx] + existing_neighbors
-out_df = df.loc[rows_order].copy()
+# # Assemble output frame: main first, then neighbors
+# rows_order = [main_idx] + existing_neighbors
+# out_df = df.loc[rows_order].copy()
 
-# Add helpful columns
-out_df.insert(0, "source_role", ["main"] + ["neighbor"] * len(existing_neighbors))
-out_df.insert(1, "similarity_score",
-              [None] + [score_map.get(i) for i in existing_neighbors])
+# # Add helpful columns
+# out_df.insert(0, "source_role", ["main"] + ["neighbor"] * len(existing_neighbors))
+# out_df.insert(1, "similarity_score",
+#               [None] + [score_map.get(i) for i in existing_neighbors])
 
-# If you prefer pipe-joining list columns for readability in CSV:
-for col in piped_cols:
-    out_df[col] = out_df[col].apply(lambda x: "|".join(x) if isinstance(x, list) else x)
+# # If you prefer pipe-joining list columns for readability in CSV:
+# for col in piped_cols:
+#     out_df[col] = out_df[col].apply(lambda x: "|".join(x) if isinstance(x, list) else x)
 
-# Write the CSV next to the script
-out_csv = os.path.join(script_dir, f"recommendations.csv")
-out_df.to_csv(out_csv, index=True, encoding="utf-8")
+# # Write the CSV next to the script
+# out_csv = os.path.join(script_dir, f"recommendations.csv")
+# out_df.to_csv(out_csv, index=True, encoding="utf-8")
 
-print(f'Saved top-20 CSV for "{obj_key}" -> {out_csv}')
+# print(f'Saved top-20 CSV for "{obj_key}" -> {out_csv}')

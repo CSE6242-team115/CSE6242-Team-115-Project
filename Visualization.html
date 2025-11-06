@@ -27,6 +27,173 @@
 <body>
   <header>
     <strong>Similarity Star</strong>
+    <input id="searchBox" type="text" placeholder="Search by Object Number or Title…" />
+    <span class="hint">Press Enter to visualize.</span>
+</header>
+<div id="legend">Main pinned at center. Neighbors sized by similarity_score.</div>
+<div id="info">Loading full dataset…</div>
+<script>
+document.addEventListener("DOMContentLoaded", async function() {
+  const width = Math.min(window.innerWidth, 1200);
+  const height = 1400;
+
+  const svg = d3.select("body").append("svg")
+    .attr("width", width)
+    .attr("height", height);
+  const gWrapper = svg.append("g")
+    .attr("transform", "translate(200, -120) scale(0.80)");
+  const gLinks = gWrapper.append("g").attr("class", "links");
+  const gNodes = gWrapper.append("g").attr("class", "nodes");
+  const info = d3.select("#info");
+
+  const jsonPath = "full_artworks2.json";
+  let allData = null;
+
+  try {
+    allData = await d3.json(jsonPath);
+    info.html("Dataset loaded. Search for an Object Number or Title above.");
+  } catch (e) {
+    info.html("<b>Could not load full_artworks2.json.</b>");
+    return;
+  }
+
+  // --- Search input event ---
+  const searchInput = document.getElementById("searchBox");
+  searchInput.addEventListener("keydown", e => {
+    if (e.key === "Enter") {
+      const query = searchInput.value.trim().toLowerCase();
+      if (!query) return;
+      let key = Object.keys(allData).find(k => k.toLowerCase() === query);
+      if (!key) {
+        // fallback: match by title substring
+        key = Object.keys(allData).find(k =>
+          (allData[k].title || "").toLowerCase().includes(query)
+        );
+      }
+      if (!key) {
+        info.html("<b>No match found.</b>");
+        return;
+      }
+      renderGraph(allData[key]);
+    }
+  });
+  // --- function to truncate titles ---
+  function truncateTitle(title, maxLen = 100) {
+    if (!title) return "";
+    return title.length > maxLen ? title.slice(0, maxLen - 1) + "…" : title;
+  }
+
+  function renderGraph(mainRec) {
+    gNodes.selectAll("*").remove();
+    gLinks.selectAll("*").remove();
+
+    const mainId = mainRec.index;
+    const mainKey = Object.keys(allData).find(k => allData[k].index === mainRec.index);
+    const nodes = [{
+      id: mainId,
+      title: mainRec.title,
+      main: true,
+      score: 0,
+      objectID: mainKey,
+      artist: (mainRec.artist || []).join(", "),
+      year: mainRec.object_date || "Unknown"
+    }];
+    const links = [];
+
+    (mainRec.similar_neighbors_scored || []).forEach(n => {
+  const targetKey = Object.keys(allData).find(k => allData[k].index === n.index);
+  const targetRec = allData[targetKey];
+  if (!targetRec) return;
+  nodes.push({
+    id: targetRec.index,
+    title: targetRec.title,
+    main: false,
+    score: n.score,
+    objectID: targetKey,
+    artist: (targetRec.artist || []).join(", "),
+    year: targetRec.object_date || "Unknown"
+  });
+  links.push({ source: mainId, target: targetRec.index, value: n.score });
+  });
+
+    const scores = nodes.filter(d => !d.main).map(d => d.score);
+    const sMin = Math.min(...scores);
+    const sMax = Math.max(...scores);
+    const rScale = d3.scaleSqrt().domain([sMin, sMax]).range([14, 52]);
+    const color = d3.scaleSequential()
+      .domain([sMin, sMax])
+      .interpolator(d3.interpolateHsl("hsl(210,70%,90%)", "hsl(210,90%,30%)"));
+
+
+    // Add margins to prevent text cutoff
+    const BASE_DISTANCE = 285;
+    const CHARGE = -1200;
+    const LABEL_PAD = 65;
+
+    // Balanced margins to prevent label cutoff
+    const MARGIN_LEFT = 200;
+    const MARGIN_RIGHT = 200;
+    const usableWidth = width - MARGIN_LEFT - MARGIN_RIGHT;
+
+    const sim = d3.forceSimulation(nodes)
+      .force("link", d3.forceLink(links).id(d => d.id)
+        .distance(l => BASE_DISTANCE)
+        .strength(0.85))
+      .force("charge", d3.forceManyBody().strength(CHARGE))
+      .force("center", d3.forceCenter(MARGIN_LEFT + usableWidth / 2, height / 2))
+      .force("collide", d3.forceCollide().radius(d => (d.main ? 58 : rScale(d.score)) + LABEL_PAD))
+      .alpha(1).alphaTarget(0.15)
+      .on("tick", ticked);
+
+    const mainNode = nodes.find(n => n.main);
+    if (mainNode) { mainNode.fx = width/2; mainNode.fy = height/2; }
+
+    gLinks.selectAll("path.link")
+      .data(links).enter().append("path")
+      .attr("class", "link")
+      .style("stroke-width", d => 1 + (d.value || 0)/20);
+
+    const node = gNodes.selectAll("g.node")
+      .data(nodes).enter().append("g")
+      .attr("class", "node")
+      .on("click", showDetails);
+
+    node.append("circle")
+      .attr("r", d => d.main ? 58 : rScale(d.score))
+      .style("fill", d => d.main ? "#ffb4c2" : color(d.score));
+
+    node.append("text")
+      .attr("dy", d => (d.main ? 72 : rScale(d.score) + 14))
+      .text(d => truncateTitle(d.title, 75))
+      .style("font-weight", d => d.main ? "700" : "500");
+
+    function ticked() {
+      const pad = 200; // adds both left/right breathing room
+      nodes.forEach(d => {
+        d.x = Math.max(pad, Math.min(width - pad, d.x));
+        d.y = Math.max(pad, Math.min(height - pad, d.y));
+      });
+      gLinks.selectAll("path.link")
+        .attr("d", d => `M${d.source.x},${d.source.y} L${d.target.x},${d.target.y}`);
+      gNodes.selectAll("g.node")
+        .attr("transform", d => `translate(${d.x},${d.y})`);
+    }
+
+    function showDetails(d) {
+      info.html("");
+      info.append("h3").text(d.title + (d.main ? " (Main)" : ""));
+      info.append("div").html(`<b>Object ID:</b> ${d.objectID}`);
+      info.append("div").html(`<b>Artist(s):</b> ${d.artist || "Unknown"}`);
+      info.append("div").html(`<b>Date:</b> ${d.year}`);
+      info.append("div").html(`<b>Similarity score:</b> ${d.score}`);
+    }
+  }
+});
+</script>
+</body>
+</html>
+
+<!--     
     <span class="hint">Loaded from <code>recommendations</code> (no extension) or <code>recommendations.csv</code>. Main = <code>source_role="main"</code>. Circle size = <code>similarity_score</code>.</span>
   </header>
 
@@ -214,4 +381,4 @@
   });
   </script>
 </body>
-</html>
+</html> -->
