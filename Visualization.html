@@ -2,22 +2,19 @@
 <html lang="en">
 <head>
   <meta charset="utf-8" />
-  <title>Met Objects — Similarity Star</title>
+  <title>Met Objects — Similarity Star (recommendations)</title>
   <style>
     body { font-family: system-ui, -apple-system, Segoe UI, Roboto, sans-serif; margin: 0; }
     header { padding: 12px 16px; background: #f6f8fa; border-bottom: 1px solid #e5e7eb; display:flex; gap:8px; align-items:center; }
-    input[type="text"] { padding: 8px 10px; border: 1px solid #d1d5db; border-radius: 8px; width: 420px; }
-    button { padding: 8px 12px; border: 1px solid #d1d5db; background: white; border-radius: 8px; cursor: pointer; }
-    button:hover { background: #f3f4f6; }
     .hint { color:#6b7280; font-size: 12px; margin-left: 6px; }
     svg { display:block; background:white; }
 
-    path.link { fill: none; stroke: #9ca3af; stroke-width: 1.5px; opacity: 0.85; } /* constant width now */
-    g.node text { fill: #111827; font: 11px/1.2 sans-serif; pointer-events: none; text-anchor: middle; }
+    path.link { fill: none; stroke: #9ca3af; stroke-width: 1.5px; opacity: 0.85; }
+    g.node text { fill: #111827; font: 16px/1.2 sans-serif; pointer-events: none; text-anchor: middle; }
     g.node circle { stroke: #374151; stroke-width: 1px; }
 
     #info {
-      position: fixed; right: 16px; top: 64px; width: 340px; max-height: 75vh; overflow:auto;
+      position: fixed; right: 16px; top: 64px; width: 360px; max-height: 75vh; overflow:auto;
       background: #ffffff; border:1px solid #e5e7eb; border-radius: 12px; padding: 12px 14px; box-shadow: 0 6px 18px rgba(0,0,0,0.08);
       font-size: 13px;
     }
@@ -29,23 +26,26 @@
 </head>
 <body>
   <header>
-    <label for="mainTitle"><strong>Main Title:</strong></label>
-    <input id="mainTitle" type="text" placeholder="Type an exact Title from the CSV…" />
-    <button id="buildBtn">Build graph</button>
-    <span class="hint">Circle size = number of matching fields with the main item.</span>
+    <strong>Similarity Star</strong>
+    <span class="hint">Loaded from <code>recommendations</code> (no extension) or <code>recommendations.csv</code>. Main = <code>source_role="main"</code>. Circle size = <code>similarity_score</code>.</span>
   </header>
 
-  <div id="legend">Circle size = matches with main. Nodes are spaced using strong repulsion + collision.</div>
-  <div id="info">Click a node to see details here.</div>
+  <div id="legend">Main pinned at center. Neighbors sized by <em>similarity_score</em>. Edges use base distance = 200.</div>
+  <div id="info">Loading…</div>
 
   <script>
   document.addEventListener("DOMContentLoaded", function () {
     const width = Math.min(window.innerWidth, 1200);
-    const height = 760;
+    const height = 1520; // ⬆ doubled vertical height
 
-    const csvPath = "MetObjects-Cleaned-20sample.csv";
+    const CANDIDATE_PATHS = [
+      "recommendations",
+      "./recommendations",
+      "recommendations.csv",
+      "./recommendations.csv"
+    ];
 
-    const columns = [
+    const COLUMNS = [
       "Object Number","Object ID","Gallery Number","Department","AccessionYear",
       "Object Name","Title","Culture","Period","Dynasty","Reign","Portfolio",
       "Artist Nationality","Object Begin Date","Object End Date","City","State","County",
@@ -56,7 +56,13 @@
       .attr("width", width)
       .attr("height", height);
 
-    const info = d3.select("#info");
+    const gWrapper = svg.append("g")
+      .attr("transform", "translate(75, -120) scale(0.80)"); // shift upward 200px
+
+    const gLinks = gWrapper.append("g").attr("class", "links");
+    const gNodes = gWrapper.append("g").attr("class", "nodes");
+
+    const info  = d3.select("#info");
 
     const norm = v => {
       if (v === undefined || v === null) return null;
@@ -64,126 +70,98 @@
       if (!s || s.toLowerCase() === "null" || s.toLowerCase() === "nan") return null;
       return s;
     };
-    const normKey = v => (v == null ? null : String(v).trim().toLowerCase());
 
-    let dataRows = [];
+    function getVal(row, name) {
+      const spaced = name;
+      const underscored = name.replace(/\s+/g, "_");
+      return Object.prototype.hasOwnProperty.call(row, spaced) ? row[spaced]
+           : Object.prototype.hasOwnProperty.call(row, underscored) ? row[underscored]
+           : undefined;
+    }
 
-    d3.csv(csvPath).then(rows => {
-      dataRows = rows;
-      const firstTitle = rows.find(r => norm(r.Title))?.Title || "";
-      d3.select("#mainTitle").property("value", firstTitle);
-    }).catch(err => {
-      console.error("CSV load error:", err);
-      info.html("<b>Could not load CSV.</b> Make sure the file is in the same folder and not tracked by Git LFS.");
-    });
+    function detectDelimiter(text) {
+      const firstLine = (text.split(/\r?\n/)[0] || "").replace(/^\uFEFF/, "");
+      const counts = { ",": (firstLine.match(/,/g) || []).length, "\t": (firstLine.match(/\t/g) || []).length, ";": (firstLine.match(/;/g) || []).length };
+      const best = Object.entries(counts).sort((a,b) => b[1]-a[1])[0];
+      return (best && best[1] > 0) ? best[0] : ",";
+    }
 
-    d3.select("#buildBtn").on("click", () => {
-      const titleInput = d3.select("#mainTitle").property("value") || "";
-      buildGraph(titleInput);
-    });
+    (async function loadAndRender() {
+      let pickedPath = null, text = null;
+      for (const p of CANDIDATE_PATHS) {
+        try { text = await d3.text(p); if (text && text.trim().length > 0) { pickedPath = p; break; } }
+        catch (e) {}
+      }
 
-    function buildGraph(mainTitleRaw) {
-      svg.selectAll("*").remove(); // clear
-
-      const gLinks = svg.append("g");
-      const gNodes = svg.append("g");
-
-      const mainTitle = norm(mainTitleRaw);
-      if (!mainTitle) {
-        info.html("<b>Please type a Title from the CSV and click Build graph.</b>");
+      if (!pickedPath) {
+        info.html(`<b>Could not load recommendations file.</b> Ensure it exists and your local server is running.`);
         return;
       }
 
-      const mainRow = dataRows.find(r => normKey(r.Title) === normKey(mainTitle));
-      if (!mainRow) {
-        info.html(`<b>No exact Title match found:</b> "${mainTitleRaw}". Try copy/paste from the CSV.`);
-        return;
-      }
+      const clean = text.replace(/^\uFEFF/, "");
+      const delim = detectDelimiter(clean);
+      const parser = d3.dsvFormat(delim);
+      const rows = parser.parse(clean).map(r => ({
+        ...r,
+        similarity_score: (r.similarity_score === "" || r.similarity_score == null) ? null : +r.similarity_score
+      }));
 
-      const nodesMap = new Map();
-      function makeId(row) {
-        const objNo = norm(row["Object Number"]);
-        return objNo || norm(row.Title) || ("id_" + Math.random().toString(36).slice(2));
-      }
+      if (!rows.length) { info.html("<b>File loaded but empty.</b>"); return; }
 
-      const mainId = makeId(mainRow);
-      nodesMap.set(mainId, { id: mainId, title: norm(mainRow.Title) || "(Untitled)", row: mainRow, main: true, matchCount: 0 });
+      const mainRows = rows.filter(r => String((r.source_role || r.Source_Role || "")).toLowerCase() === "main");
+      if (mainRows.length === 0) { info.html("<b>No row with source_role == 'main'.</b>"); return; }
+      const mainRow = mainRows[0];
+      const neighbors = rows.filter(r => String((r.source_role || r.Source_Role || "")).toLowerCase() === "neighbor");
 
+      const nodes = [];
       const links = [];
-      const mainNorms = {};
-      columns.forEach(c => mainNorms[c] = normKey(mainRow[c]));
 
-      dataRows.forEach(row => {
-        if (row === mainRow) return;
-        let matchCount = 0;
-        const matchedCols = [];
-        columns.forEach(c => {
-          const a = mainNorms[c];
-          const b = normKey(row[c]);
-          if (a && b && a === b) { matchCount++; matchedCols.push(c); }
-        });
-        if (matchCount > 0) {
-          const id = makeId(row);
-          if (!nodesMap.has(id)) {
-            nodesMap.set(id, { id, title: norm(row.Title) || "(Untitled)", row, main: false, matchCount }); // CHANGED: store matchCount on node
-          } else {
-            // if duplicate id somehow, keep max matches
-            nodesMap.get(id).matchCount = Math.max(nodesMap.get(id).matchCount, matchCount);
-          }
-          links.push({ source: mainId, target: id, value: matchCount, matchedCols });
-        }
+      const mainId = norm(getVal(mainRow, "Object Number")) || norm(getVal(mainRow, "Title")) || "MAIN";
+      nodes.push({ id: mainId, title: norm(getVal(mainRow, "Title")) || "(Untitled)", row: mainRow, main: true, score: 0 });
+
+      neighbors.forEach(r => {
+        const id = norm(getVal(r, "Object Number")) || norm(getVal(r, "Title")) || Math.random().toString(36).slice(2);
+        const score = Number.isFinite(r.similarity_score) ? r.similarity_score : 0;
+        nodes.push({ id, title: norm(getVal(r, "Title")) || "(Untitled)", row: r, main: false, score });
+        links.push({ source: mainId, target: id, value: score });
       });
 
-      const nodes = Array.from(nodesMap.values());
-      if (nodes.length === 1) {
-        info.html(`<b>Only the main node found.</b> No other items share fields with "<i>${nodes[0].title}</i>".`);
-      }
-
-      // CHANGED: radius scales by matchCount (neighbors) and a fixed size for main
-      const mcVals = nodes.filter(n => !n.main).map(n => n.matchCount);
-      const mcMin = mcVals.length ? Math.min(...mcVals) : 1;
-      const mcMax = mcVals.length ? Math.max(...mcVals) : 1;
-      const rScale = d3.scaleSqrt().domain([mcMin, mcMax]).range([10, 40]); // bigger circles
-
-      // color can also reflect matches (darker = more matches)
-      const color = d3.scaleSequential()
-        .domain([mcMin, mcMax])
+      const scores = neighbors.map(r => r.similarity_score).filter(Number.isFinite);
+      const sMin = scores.length ? Math.min(...scores) : 1;
+      const sMax = scores.length ? Math.max(...scores) : 1;
+      const rScale = d3.scaleSqrt().domain([sMin, sMax]).range([14, 52]);
+      const color  = d3.scaleSequential().domain([sMin, sMax])
         .interpolator(d3.interpolateHsl("hsl(210,70%,90%)", "hsl(210,90%,30%)"));
+      const nodeRadius = d => d.main ? 58 : rScale(d.score);
 
-      // CHANGED: stronger spacing — longer links, stronger repulsion, and collision force
+      // Adjusted for requested edge length
+      const BASE_DISTANCE = 285;   // << you can change this value anytime
+      const CHARGE = -1200;
+      const LABEL_PAD = 65;
+
       const sim = d3.forceSimulation(nodes)
         .force("link", d3.forceLink(links)
           .id(d => d.id)
-          .distance(d => 240 + Math.max(0, 20 * (mcMax - (d.value || 1)))) // longer base distance
-          .strength(0.8))
-        .force("charge", d3.forceManyBody().strength(-800)) // stronger repulsion
+          .distance(l => BASE_DISTANCE + nodeRadius(l.source) + nodeRadius(l.target))
+          .strength(0.85))
+        .force("charge", d3.forceManyBody().strength(CHARGE))
         .force("center", d3.forceCenter(width/2, height/2))
-        .force("collide", d3.forceCollide().radius(d => (d.main ? 46 : rScale(d.matchCount) + 16)).iterations(2)) // CHANGED
-        .alpha(1)
-        .alphaTarget(0.2)
+        .force("collide", d3.forceCollide().radius(d => nodeRadius(d) + LABEL_PAD).iterations(3))
+        .alpha(1).alphaTarget(0.15)
         .on("tick", ticked);
 
-      // Pin main node
       const mainNode = nodes.find(n => n.main);
-      if (mainNode) {
-        mainNode.fx = width / 2;
-        mainNode.fy = height / 2;
-      }
+      if (mainNode) { mainNode.fx = width/2; mainNode.fy = height/2; }
 
-      // Links (constant width now)
-      const link = gLinks.selectAll("path.link")
-        .data(links)
-        .enter()
-        .append("path")
+      gLinks.selectAll("path.link")
+        .data(links).enter().append("path")
         .attr("class", "link")
+        .style("stroke-width", d => 1 + (d.value || 0) / 20)
         .append("title")
-        .text(d => `Shared fields (${d.value}): ${d.matchedCols.join(", ")}`);
+        .text(d => `Similarity score: ${d.value ?? "n/a"}`);
 
-      // Nodes
       const node = gNodes.selectAll("g.node")
-        .data(nodes)
-        .enter()
-        .append("g")
+        .data(nodes).enter().append("g")
         .attr("class", "node")
         .call(d3.drag()
           .on("start", dragstarted)
@@ -192,77 +170,47 @@
         .on("click", showDetails);
 
       node.append("circle")
-        .attr("r", d => d.main ? 46 : rScale(d.matchCount)) // CHANGED
-        .style("fill", d => d.main ? "#ffb4c2" : color(d.matchCount))
+        .attr("r", d => nodeRadius(d))
+        .style("fill", d => d.main ? "#ffb4c2" : color(d.score))
         .style("stroke-width", d => d.main ? 2 : 1.2);
 
-      // Put label BELOW the circle and add extra padding
       node.append("text")
-        .attr("dy", d => (d.main ? 46 : rScale(d.matchCount)) + 14) // CHANGED
+        .attr("dy", d => nodeRadius(d) + 14)
         .text(d => d.title)
         .style("font-weight", d => d.main ? "700" : "500");
 
       function ticked() {
-        gLinks.selectAll("path.link").attr("d", d => {
-          return `M${d.source.x},${d.source.y} L${d.target.x},${d.target.y}`;
+        const pad = 80;
+        nodes.forEach(d => {
+          d.x = Math.max(pad, Math.min(width - pad, d.x));
+          d.y = Math.max(pad, Math.min(height - pad, d.y));
         });
+        gLinks.selectAll("path.link").attr("d", d => `M${d.source.x},${d.source.y} L${d.target.x},${d.target.y}`);
         gNodes.selectAll("g.node").attr("transform", d => `translate(${d.x},${d.y})`);
       }
 
-      function dragstarted(d) {
-        if (d.main) return; // keep main pinned
-        if (!d3.event.active) sim.alphaTarget(0.3).restart();
-        d.fx = d.x; d.fy = d.y;
-      }
-      function dragged(d) {
-        if (d.main) return;
-        d.fx = d3.event.x; d.fy = d3.event.y;
-      }
-      function dragended(d) {
-        if (d.main) { d.fx = width/2; d.fy = height/2; return; }
-        if (!d3.event.active) sim.alphaTarget(0);
-        d.fx = d.x; d.fy = d.y;
-      }
+      function dragstarted(d) { if (!d3.event.active) sim.alphaTarget(0.3).restart(); d.fx = d.x; d.fy = d.y; }
+      function dragged(d) { d.fx = d3.event.x; d.fy = d3.event.y; }
+      function dragended(d) { if (!d3.event.active) sim.alphaTarget(0); if (d.main) { d.fx = width/2; d.fy = height/2; } }
 
       function showDetails(d) {
         const row = d.row || {};
         const nonNullPairs = [];
-        columns.forEach(c => {
-          const v = norm(row[c]);
-          if (v !== null) nonNullPairs.push([c, v]);
-        });
-
-        let shared = [];
-        if (!d.main) {
-          const sharedCols = [];
-          columns.forEach(c => {
-            const a = normKey(mainRow[c]);
-            const b = normKey(row[c]);
-            if (a && b && a === b) sharedCols.push(c);
-          });
-          shared = sharedCols;
-        }
+        COLUMNS.forEach(c => { const v = norm(getVal(row, c)); if (v !== null) nonNullPairs.push([c, v]); });
 
         info.html("");
-        info.append("h3").text(d.title + (d.main ? " (Main)" : ""));
-        if (!d.main) {
-          info.append("div").style("margin","4px 0 8px 0")
-              .html(`<b>Shared with main (${d.matchCount}):</b> ${shared.join(", ")}`);
-        } else {
-          info.append("div").style("margin","4px 0 8px 0")
-              .html(`<b>Main node pinned at center.</b>`);
-        }
+        info.append("h3").text((getVal(row, "Title") || "(Untitled)") + (d.main ? " (Main)" : ""));
+        if (!d.main && Number.isFinite(d.score)) info.append("div").html(`<b>Similarity score:</b> ${d.score}`);
+        else if (d.main) info.append("div").html(`<b>Main node pinned at center.</b>`);
+
         const dl = info.append("div");
         nonNullPairs.forEach(([k, v]) => {
           const line = dl.append("div").style("margin","2px 0");
           line.append("span").attr("class","k").text(k + ": ");
           line.append("span").text(v);
         });
-        if (nonNullPairs.length === 0) {
-          info.append("div").text("No non-null fields to display.");
-        }
       }
-    }
+    })();
   });
   </script>
 </body>

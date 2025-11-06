@@ -1,47 +1,74 @@
 import os
+import sys
+import math
+import json
 import pandas as pd
 from collections import defaultdict
-import json
 
-# Load Data
+# ---------- JSON safety helpers ----------
+def _json_safe_scalar(x):
+    # Convert pandas/NumPy NaN/Inf to proper JSON types
+    if x is None:
+        return None
+    if isinstance(x, float) and (math.isnan(x) or math.isinf(x)):
+        return None
+    return x
+
+def json_sanitize(obj):
+    """Recursively convert any NaN/Inf to None so json.dump with allow_nan=False succeeds."""
+    if isinstance(obj, dict):
+        return {k: json_sanitize(v) for k, v in obj.items()}
+    if isinstance(obj, list):
+        return [json_sanitize(v) for v in obj]
+    return _json_safe_scalar(obj)
+
+# ---------- Load + prep data ----------
 script_dir = os.path.dirname(os.path.abspath(__file__))
-df = pd.read_csv(os.path.join(script_dir, "MetObjects-Cleaned_Columns-csv_v2.csv"), low_memory = False)
+csv_source = os.path.join(script_dir, "MetObjects-Cleaned_Columns-csv_v2.csv")
+
+df = pd.read_csv(csv_source, low_memory=False)
 df.columns = df.columns.str.replace(" ", "_")
-df = df.sample(n=5000, random_state=42)
+df = df.sample(n=5000, random_state=42)   # keep indices as-is (used in JSON)
 
-#save df as csv file
-cleaned_csv_path = os.path.join(script_dir, "MetObjects-Cleaned-5000sample.csv")
-df.to_csv(cleaned_csv_path, index=True, encoding="utf-8")
+# (Optional) also save the sampled CSV (with index) so your HTML can load it
+sample_csv_path = os.path.join(script_dir, "MetObjects-Cleaned-5000sample.csv")
+df.to_csv(sample_csv_path, index=True, encoding="utf-8")
 
-# Filter relevant columns
-cols = ["Artist Display Name", "Object Date", "Medium", "Culture", "Object Number", "Department",
-        "Object Name", "Title", "Period", "Dynasty", "Reign", "Portfolio", "Artist Nationality",
-        "Object Begin Date", "Object End Date", "City", "State", "County", "Country", "Region",
-        "Subregion", "Locale", "Classification", "Tags"]
-cols = [col.replace(" ", "_") for col in cols]
+# Columns used in indexing / scoring
+cols = [
+    "Artist Display Name", "Object Date", "Medium", "Culture", "Object Number", "Department",
+    "Object Name", "Title", "Period", "Dynasty", "Reign", "Portfolio", "Artist Nationality",
+    "Object Begin Date", "Object End Date", "City", "State", "County", "Country", "Region",
+    "Subregion", "Locale", "Classification", "Tags"
+]
+cols = [c.replace(" ", "_") for c in cols]
 df = df[cols]
 
-# Split piped strings into list of strings
+# Pipe-split columns
 piped_cols = [
-    'Artist Display Name', 'Artist Nationality', 'City', 'State',
-    'County', 'Country', 'Region', 'Subregion', 'Locale', 'Tags'
+    "Artist Display Name", "Artist Nationality", "City", "State",
+    "County", "Country", "Region", "Subregion", "Locale", "Tags"
 ]
-piped_cols = [col.replace(" ", "_") for col in piped_cols]
+piped_cols = [c.replace(" ", "_") for c in piped_cols]
+
 for col in piped_cols:
     df[col] = (
-        df[col].fillna('').apply(lambda x: [v.strip() for v in str(x).split('|') if v.strip()])
+        df[col].fillna('')
+              .apply(lambda x: [v.strip() for v in str(x).split('|') if v.strip()])
     )
 
-# Nested Dict
-attr_cols = ["Artist Display Name", "Object Date", "Medium", "Culture", "Department",
-        "Object Name", "Period", "Dynasty", "Reign", "Portfolio", "Artist Nationality",
-        "Object Begin Date", "Object End Date", "City", "State", "County", "Country", "Region",
-        "Subregion", "Locale", "Classification", "Tags"]
-attr_cols = [col.replace(" ", "_") for col in attr_cols]
+# Build nested dictionaries: {column -> {value -> set(indexes)}}
+attr_cols = [
+    "Artist Display Name", "Object Date", "Medium", "Culture", "Department",
+    "Object Name", "Period", "Dynasty", "Reign", "Portfolio", "Artist Nationality",
+    "Object Begin Date", "Object End Date", "City", "State", "County", "Country", "Region",
+    "Subregion", "Locale", "Classification", "Tags"
+]
+attr_cols = [c.replace(" ", "_") for c in attr_cols]
 
-attr_dict = dict()
+attr_dict = {}
 for col in attr_cols:
-    attr_dict[col] = dict()
+    attr_dict[col] = {}
     if col in piped_cols:
         grouped = df.explode(col).groupby(col).groups
     else:
@@ -49,7 +76,7 @@ for col in attr_cols:
     for key in grouped:
         attr_dict[col][key] = grouped[key]
 
-# 1) Column weights (matching your DataFrame's underscore names)
+# ---------- Column weights ----------
 COL_WEIGHTS = {
     "Title": 20,
     "Department": 18,
@@ -75,7 +102,7 @@ COL_WEIGHTS = {
     "Country": 5,
 }
 DEFAULT_COL_WEIGHT = 1.0
-TOP_K = 20  # number of recommendations to keep
+TOP_K = 20
 
 def _is_blank(v):
     if v is None:
@@ -88,7 +115,7 @@ def _is_blank(v):
         return True
     return False
 
-# 2) Compute weighted similarity scores
+# ---------- Compute weighted similarity scores for all rows ----------
 all_neighbor_scores = {}
 
 for row in df.itertuples():
@@ -103,14 +130,10 @@ for row in df.itertuples():
             if _is_blank(v):
                 return
             neighbors = attr_dict[col].get(v, set())
-            # Convert to a normal Python set in case it's a pandas Index
-            if isinstance(neighbors, pd.Index):
-                neighbors = set(neighbors)
-            elif not isinstance(neighbors, set):
-                neighbors = set(neighbors)
-            if len(neighbors) == 0:
+            # ensure plain set
+            neighbors = set(neighbors) if not isinstance(neighbors, set) else neighbors
+            if not neighbors:
                 return
-            # each match adds the column weight
             for j in neighbors:
                 if j != idx:
                     scores[j] += col_weight
@@ -123,24 +146,22 @@ for row in df.itertuples():
             if not _is_blank(val):
                 add_value(val)
 
-    # 3) Rank neighbors by total weighted score
     ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)[:TOP_K]
     all_neighbor_scores[idx] = ranked
 
-# 4) Build output records (top-20 indices + scores)
+# ---------- Build JSON { object_number -> {..., similar_neighbors_scored: [{index, score}, ...]} } ----------
 output_dict = {}
 
 for idx, row in df.iterrows():
     ranked = all_neighbor_scores.get(idx, [])
     object_num = str(row.Object_Number).strip()
-
     if not object_num:
-        continue  # skip rows with no object number
+        continue
 
     output_dict[object_num] = {
         "index": int(idx),
         "title": row.Title,
-        "artist": row.Artist_Display_Name,
+        "artist": row.Artist_Display_Name,  # list from piped cols or empty list
         "medium": row.Medium,
         "culture": row.Culture,
         "object_date": row.Object_Date,
@@ -149,8 +170,68 @@ for idx, row in df.iterrows():
         ],
     }
 
-# Save to JSON file
-output_path = os.path.join(script_dir, "full_artworks2.json")
-with open(output_path, "w", encoding="utf-8") as f:
-    json.dump(output_dict, f, ensure_ascii=False, indent=2)
+# Write strict JSON
+json_path = os.path.join(script_dir, "full_artworks2.json")
+clean_output = json_sanitize(output_dict)
+with open(json_path, "w", encoding="utf-8") as f:
+    json.dump(clean_output, f, ensure_ascii=False, indent=2, allow_nan=False)
 
+print(f"Wrote recommendations JSON -> {json_path}")
+print(f"Wrote sampled CSV         -> {sample_csv_path}")
+
+# ---------- Ask for Object Number and export top-20 CSV ----------
+# Accept as CLI arg or interactive input
+if len(sys.argv) > 1:
+    obj_key = " ".join(sys.argv[1:]).strip()
+else:
+    obj_key = input("\nEnter Object Number exactly as in JSON (e.g., 2011.604.1.4597): ").strip()
+
+if not obj_key:
+    print("No object number provided; exiting.")
+    sys.exit(0)
+
+if obj_key not in clean_output:
+    # Try trimmed match fallback (in case of accidental whitespace)
+    trimmed_map = {k.strip(): k for k in clean_output.keys()}
+    if obj_key.strip() in trimmed_map:
+        obj_key = trimmed_map[obj_key.strip()]
+    else:
+        print(f'Object Number "{obj_key}" not found in {os.path.basename(json_path)}')
+        sys.exit(1)
+
+rec = clean_output[obj_key]
+main_idx = int(rec["index"])
+
+# Build neighbor list (indices + score)
+neighbors = rec.get("similar_neighbors_scored", []) or []
+neighbor_indices = []
+score_map = {}
+for item in neighbors:
+    try:
+        nidx = int(item["index"])
+        neighbor_indices.append(nidx)
+        score_map[nidx] = float(item.get("score", 0.0))
+    except Exception:
+        continue
+
+# Filter to indices that actually exist in df
+existing_neighbors = [i for i in neighbor_indices if i in df.index]
+
+# Assemble output frame: main first, then neighbors
+rows_order = [main_idx] + existing_neighbors
+out_df = df.loc[rows_order].copy()
+
+# Add helpful columns
+out_df.insert(0, "source_role", ["main"] + ["neighbor"] * len(existing_neighbors))
+out_df.insert(1, "similarity_score",
+              [None] + [score_map.get(i) for i in existing_neighbors])
+
+# If you prefer pipe-joining list columns for readability in CSV:
+for col in piped_cols:
+    out_df[col] = out_df[col].apply(lambda x: "|".join(x) if isinstance(x, list) else x)
+
+# Write the CSV next to the script
+out_csv = os.path.join(script_dir, f"recommendations.csv")
+out_df.to_csv(out_csv, index=True, encoding="utf-8")
+
+print(f'Saved top-20 CSV for "{obj_key}" -> {out_csv}')
