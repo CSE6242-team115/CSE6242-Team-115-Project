@@ -39,7 +39,7 @@ cols = [
     "Artist Display Name", "Object Date", "Medium", "Culture", "Object Number", "Department",
     "Object Name", "Title", "Period", "Dynasty", "Reign", "Portfolio", "Artist Nationality",
     "Object Begin Date", "Object End Date", "City", "State", "County", "Country", "Region",
-    "Subregion", "Locale", "Classification", "Tags"
+    "Subregion", "Locale", "Classification", "Tags", "Gallery Number"
 ]
 cols = [c.replace(" ", "_") for c in cols]
 df = df[cols]
@@ -62,7 +62,7 @@ attr_cols = [
     "Artist Display Name", "Object Date", "Medium", "Culture", "Department",
     "Object Name", "Period", "Dynasty", "Reign", "Portfolio", "Artist Nationality",
     "Object Begin Date", "Object End Date", "City", "State", "County", "Country", "Region",
-    "Subregion", "Locale", "Classification", "Tags"
+    "Subregion", "Locale", "Classification", "Tags", "Gallery Number"
 ]
 attr_cols = [c.replace(" ", "_") for c in attr_cols]
 
@@ -78,7 +78,7 @@ for col in attr_cols:
 
 # ---------- Column weights ----------
 COL_WEIGHTS = {
-    "Title": 20,
+    "Title": 14,
     "Department": 18,
     "Object_Name": 17,
     "Medium": 17,
@@ -165,6 +165,7 @@ for idx, row in df.iterrows():
         "medium": row.Medium,
         "culture": row.Culture,
         "object_date": row.Object_Date,
+        "gallery_number": row.Gallery_Number,
         "similar_neighbors_scored": [
             {"index": int(n), "score": float(s)} for (n, s) in ranked
         ],

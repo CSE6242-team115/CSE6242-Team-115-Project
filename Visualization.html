@@ -96,7 +96,8 @@ document.addEventListener("DOMContentLoaded", async function() {
       score: 0,
       objectID: mainKey,
       artist: (mainRec.artist || []).join(", "),
-      year: mainRec.object_date || "Unknown"
+      year: mainRec.object_date || "Unknown",
+      galleryNumber: mainRec.gallery_number || "Unknown"
     }];
     const links = [];
 
@@ -111,7 +112,8 @@ document.addEventListener("DOMContentLoaded", async function() {
     score: n.score,
     objectID: targetKey,
     artist: (targetRec.artist || []).join(", "),
-    year: targetRec.object_date || "Unknown"
+    year: targetRec.object_date || "Unknown",
+    galleryNumber: targetRec.gallery_number || "Unknown"
   });
   links.push({ source: mainId, target: targetRec.index, value: n.score });
   });
@@ -186,6 +188,7 @@ document.addEventListener("DOMContentLoaded", async function() {
       info.append("div").html(`<b>Artist(s):</b> ${d.artist || "Unknown"}`);
       info.append("div").html(`<b>Date:</b> ${d.year}`);
       info.append("div").html(`<b>Similarity score:</b> ${d.score}`);
+      info.append("div").html(`<b>Gallery number:</b> ${d.galleryNumber}`);
     }
   }
 });
