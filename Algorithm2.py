@@ -24,15 +24,15 @@ def json_sanitize(obj):
 
 # ---------- Load + prep data ----------
 script_dir = os.path.dirname(os.path.abspath(__file__))
-csv_source = os.path.join(script_dir, "MetObjects-Cleaned_Columns-csv_v2.csv")
+csv_source = os.path.join(script_dir, "MetObjects-GalleryNumKnown.csv")
 
 df = pd.read_csv(csv_source, low_memory=False)
 df.columns = df.columns.str.replace(" ", "_")
-df = df.sample(n=5000, random_state=42)   # keep indices as-is (used in JSON)
+#df = df.sample(n=5000, random_state=42)   # keep indices as-is (used in JSON)
 
 # (Optional) also save the sampled CSV (with index) so your HTML can load it
-sample_csv_path = os.path.join(script_dir, "MetObjects-Cleaned-5000sample.csv")
-df.to_csv(sample_csv_path, index=True, encoding="utf-8")
+#sample_csv_path = os.path.join(script_dir, "MetObjects-Cleaned-5000sample.csv")
+#df.to_csv(sample_csv_path, index=True, encoding="utf-8")
 
 # Columns used in indexing / scoring
 cols = [
@@ -172,10 +172,10 @@ for idx, row in df.iterrows():
     }
 
 # Write strict JSON
-json_path = os.path.join(script_dir, "full_artworks2.json")
+json_path = os.path.join(script_dir, "artworksGalNumKnown.json")
 clean_output = json_sanitize(output_dict)
 with open(json_path, "w", encoding="utf-8") as f:
     json.dump(clean_output, f, ensure_ascii=False, indent=2, allow_nan=False)
 
 print(f"Wrote recommendations JSON -> {json_path}")
-print(f"Wrote sampled CSV         -> {sample_csv_path}")
+#print(f"Wrote sampled CSV         -> {sample_csv_path}")
