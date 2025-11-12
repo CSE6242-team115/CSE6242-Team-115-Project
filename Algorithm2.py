@@ -4,7 +4,8 @@ import math
 import json
 import pandas as pd
 from collections import defaultdict
-
+import time
+start_time = time.time()
 # ---------- JSON safety helpers ----------
 def _json_safe_scalar(x):
     # Convert pandas/NumPy NaN/Inf to proper JSON types
@@ -28,7 +29,7 @@ csv_source = os.path.join(script_dir, "MetObjects-GalleryNumKnown.csv")
 
 df = pd.read_csv(csv_source, low_memory=False)
 df.columns = df.columns.str.replace(" ", "_")
-#df = df.sample(n=5000, random_state=42)   # keep indices as-is (used in JSON)
+#df = df.sample(n=200000, random_state=42)   # keep indices as-is (used in JSON)
 
 # (Optional) also save the sampled CSV (with index) so your HTML can load it
 #sample_csv_path = os.path.join(script_dir, "MetObjects-Cleaned-5000sample.csv")
@@ -90,7 +91,7 @@ COL_WEIGHTS = {
     "Object_End_Date": 12,
     "Portfolio": 11,
     "Locale": 8,
-    "Gallery_Number": 7,
+    "Gallery_Number": 4,
     "City": 7,
     "State": 7,
     "County": 7,
@@ -146,7 +147,9 @@ for row in df.itertuples():
             if not _is_blank(val):
                 add_value(val)
 
-    ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)[:TOP_K]
+    Threshold = 100
+
+    ranked = sorted([(n,s) for n, s in scores.items() if s <=Threshold], key=lambda kv: kv[1], reverse=True)[:TOP_K]
     all_neighbor_scores[idx] = ranked
 
 # ---------- Build JSON { object_number -> {..., similar_neighbors_scored: [{index, score}, ...]} } ----------
@@ -179,3 +182,6 @@ with open(json_path, "w", encoding="utf-8") as f:
 
 print(f"Wrote recommendations JSON -> {json_path}")
 #print(f"Wrote sampled CSV         -> {sample_csv_path}")
+end_time = time.time()
+duration = end_time-start_time
+print(f"Runtime: {duration:.4f} seconds")
