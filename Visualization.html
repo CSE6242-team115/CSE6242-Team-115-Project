@@ -271,7 +271,8 @@ document.addEventListener("DOMContentLoaded", async function() {
     const node = gNodes.selectAll("g.node")
       .data(nodes).enter().append("g")
       .attr("class", "node")
-      .on("click", showDetails);
+      .on("click", showDetails)
+      .on("dblclick", d => renderGraph(allData[d.objectID]));
 
     node.append("circle")
       .attr("r", d => d.main ? 58 : rScale(d.score))
@@ -309,7 +310,7 @@ document.addEventListener("DOMContentLoaded", async function() {
       header.innerHTML = `
         <div style="font-size: 14px; font-weight: 600;">${truncateTitle(d.title, 40)}</div>
         <div style="display: flex; gap: 12px; font-size: 12px; color: #6b7280; margin-top: 4px;">
-          <div><b>ID:</b> ${d.objectID}</div>
+          <div><b>Object Number:</b> ${d.objectID}</div>
           <div><b>Artist:</b> ${d.artist || "Unknown"}</div>
           <div><b>Year:</b> ${d.year}</div>
           <div><b>Gallery:</b> ${d.galleryNumber || "Unknown"}</div>
