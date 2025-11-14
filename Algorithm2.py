@@ -6,6 +6,8 @@ import pandas as pd
 from collections import defaultdict
 import requests
 from bs4 import BeautifulSoup
+import time
+start_time = time.time()
 
 # ---------- JSON safety helpers ----------
 def _json_safe_scalar(x):
@@ -148,7 +150,9 @@ for row in df.itertuples():
             if not _is_blank(val):
                 add_value(val)
 
-    ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)[:TOP_K]
+    Threshold = 100
+
+    ranked = sorted([(n,s) for n, s in scores.items() if s <=Threshold], key=lambda kv: kv[1], reverse=True)[:TOP_K]
     all_neighbor_scores[idx] = ranked
 
 # ---------- Build JSON { object_number -> {..., similar_neighbors_scored: [{index, score}, ...]} } ----------
@@ -193,7 +197,7 @@ for idx, row in df.iterrows():
         ],
         "imgurl": object_img
     }
-    #print(idx)
+    print(idx)
 
 # Write strict JSON
 json_path = os.path.join(script_dir, "artworksGalNumKnown.json")
@@ -203,3 +207,6 @@ with open(json_path, "w", encoding="utf-8") as f:
 
 print(f"Wrote recommendations JSON -> {json_path}")
 #print(f"Wrote sampled CSV         -> {sample_csv_path}")
+end_time = time.time()
+duration = end_time-start_time
+print(f"Runtime: {duration:.4f} seconds")
