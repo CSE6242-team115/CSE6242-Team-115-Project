@@ -4,8 +4,9 @@ import math
 import json
 import pandas as pd
 from collections import defaultdict
-import time
-start_time = time.time()
+import requests
+from bs4 import BeautifulSoup
+
 # ---------- JSON safety helpers ----------
 def _json_safe_scalar(x):
     # Convert pandas/NumPy NaN/Inf to proper JSON types
@@ -29,7 +30,7 @@ csv_source = os.path.join(script_dir, "MetObjects-GalleryNumKnown.csv")
 
 df = pd.read_csv(csv_source, low_memory=False)
 df.columns = df.columns.str.replace(" ", "_")
-#df = df.sample(n=200000, random_state=42)   # keep indices as-is (used in JSON)
+#df = df.sample(n=5000, random_state=42)   # keep indices as-is (used in JSON)
 
 # (Optional) also save the sampled CSV (with index) so your HTML can load it
 #sample_csv_path = os.path.join(script_dir, "MetObjects-Cleaned-5000sample.csv")
@@ -40,7 +41,7 @@ cols = [
     "Artist Display Name", "Object Date", "Medium", "Culture", "Object Number", "Department",
     "Object Name", "Title", "Period", "Dynasty", "Reign", "Portfolio", "Artist Nationality",
     "Object Begin Date", "Object End Date", "City", "State", "County", "Country", "Region",
-    "Subregion", "Locale", "Classification", "Tags", "Gallery Number"
+    "Subregion", "Locale", "Classification", "Tags", "Gallery Number", "Object ID"
 ]
 cols = [c.replace(" ", "_") for c in cols]
 df = df[cols]
@@ -91,7 +92,7 @@ COL_WEIGHTS = {
     "Object_End_Date": 12,
     "Portfolio": 11,
     "Locale": 8,
-    "Gallery_Number": 4,
+    "Gallery_Number": 7,
     "City": 7,
     "State": 7,
     "County": 7,
@@ -147,13 +148,12 @@ for row in df.itertuples():
             if not _is_blank(val):
                 add_value(val)
 
-    Threshold = 100
-
-    ranked = sorted([(n,s) for n, s in scores.items() if s <=Threshold], key=lambda kv: kv[1], reverse=True)[:TOP_K]
+    ranked = sorted(scores.items(), key=lambda kv: kv[1], reverse=True)[:TOP_K]
     all_neighbor_scores[idx] = ranked
 
 # ---------- Build JSON { object_number -> {..., similar_neighbors_scored: [{index, score}, ...]} } ----------
 output_dict = {}
+url = "https://www.metmuseum.org/art/collection/search/"
 
 for idx, row in df.iterrows():
     ranked = all_neighbor_scores.get(idx, [])
@@ -161,9 +161,28 @@ for idx, row in df.iterrows():
     if not object_num:
         continue
 
+    object_url = url + str(row.Object_ID)
+    object_soup = BeautifulSoup(requests.get(object_url).content, "html.parser")
+
+    h1 = object_soup.find("h1", class_ = "undefined object-overview_title__f2ysJ")
+    # pull title from webpage (if found) to include non-ASCII characters, which are absent in the csv
+    if h1 and h1.find("span"):
+        object_title = h1.find("span").text
+    elif h1 and h1.find("p"):
+        object_title = h1.find("p").text
+    else:
+        object_title = row.Title
+
+    # pull url of first image from webpage (if found)
+    figure = object_soup.find("figure", class_ = "image-viewer_figure__qI5d7")
+    if figure and figure.find("img"):
+        object_img = figure.find("img")["src"]
+    else:
+        object_img = "no_image_available.png"
+
     output_dict[object_num] = {
         "index": int(idx),
-        "title": row.Title,
+        "title": object_title,
         "artist": row.Artist_Display_Name,  # list from piped cols or empty list
         "medium": row.Medium,
         "culture": row.Culture,
@@ -172,7 +191,9 @@ for idx, row in df.iterrows():
         "similar_neighbors_scored": [
             {"index": int(n), "score": float(s)} for (n, s) in ranked
         ],
+        "imgurl": object_img
     }
+    #print(idx)
 
 # Write strict JSON
 json_path = os.path.join(script_dir, "artworksGalNumKnown.json")
@@ -182,6 +203,3 @@ with open(json_path, "w", encoding="utf-8") as f:
 
 print(f"Wrote recommendations JSON -> {json_path}")
 #print(f"Wrote sampled CSV         -> {sample_csv_path}")
-end_time = time.time()
-duration = end_time-start_time
-print(f"Runtime: {duration:.4f} seconds")
