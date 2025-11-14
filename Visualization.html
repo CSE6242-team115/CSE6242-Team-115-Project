@@ -14,7 +14,7 @@
     g.node circle { stroke: #374151; stroke-width: 1px; }
 
     #info {
-      position: fixed; top: 64px; left: 50%; transform: translateX(-50%); width: 360px; max-height: 75vh; overflow:auto;
+      position: fixed; top: 64px; left: 50%; transform: translateX(-50%); width: 720px; max-height: 75vh; overflow:auto;
       background: #ffffff; border:1px solid #e5e7eb; border-radius: 12px; padding: 12px 14px; box-shadow: 0 6px 18px rgba(0,0,0,0.08);
       font-size: 13px;
     }
@@ -144,7 +144,7 @@ document.addEventListener("DOMContentLoaded", async function() {
     allData = await d3.json(jsonPath);
     info.html("Dataset loaded. Search for an Object Number or Title above.");
   } catch (e) {
-    info.html("<b>Could not load full_artworks2.json.</b>");
+    info.html("<b>Could not load artworksGalNumKnown.json.</b>");
     return;
   }
 
@@ -193,7 +193,8 @@ document.addEventListener("DOMContentLoaded", async function() {
       objectID: mainKey,
       artist: (mainRec.artist || []).join(", "),
       year: mainRec.object_date || "Unknown",
-      galleryNumber: mainRec.gallery_number || "Unknown"
+      galleryNumber: mainRec.gallery_number || "Unknown",
+      imgurl: mainRec.imgurl
     }];
     const links = [];
 
@@ -209,7 +210,8 @@ document.addEventListener("DOMContentLoaded", async function() {
     objectID: targetKey,
     artist: (targetRec.artist || []).join(", "),
     year: targetRec.object_date || "Unknown",
-    galleryNumber: targetRec.gallery_number || "Unknown"
+    galleryNumber: targetRec.gallery_number || "Unknown",
+    imgurl: targetRec.imgurl
   });
   links.push({ source: mainId, target: targetRec.index, value: n.score });
   });
@@ -228,6 +230,7 @@ document.addEventListener("DOMContentLoaded", async function() {
         <td class="score">${node.score.toFixed(1)}</td>
       `;
       row.addEventListener("click", () => showDetails(node));
+      row.addEventListener("dblclick", () => renderGraph(allData[node.objectID]))
       tableBody.appendChild(row);
     });
 
@@ -235,10 +238,9 @@ document.addEventListener("DOMContentLoaded", async function() {
     const sMin = Math.min(...scores);
     const sMax = Math.max(...scores);
     const rScale = d3.scaleSqrt().domain([sMin, sMax]).range([14, 52]);
-    const color = d3.scaleSequential()
+    const nodeColor = d3.scaleSequential()
       .domain([sMin, sMax])
       .interpolator(d3.interpolateHsl("hsl(210,70%,90%)", "hsl(210,90%,30%)"));
-
 
     // Add margins to prevent text cutoff
     const BASE_DISTANCE = 285;
@@ -276,12 +278,26 @@ document.addEventListener("DOMContentLoaded", async function() {
 
     node.append("circle")
       .attr("r", d => d.main ? 58 : rScale(d.score))
-      .style("fill", d => d.main ? "#ffb4c2" : color(d.score));
+      .style("fill", d => d.main ? "#ffb4c2" : nodeColor(d.score));
 
+    node.append("svg:image")
+      .attr("xlink:href", d => d.imgurl)
+      .attr("x", d => d.main ? -45 : -rScale(d.score) * 0.77)
+      .attr("y", d => d.main ? -45 : -rScale(d.score) * 0.77)
+      .style("width", d => (d.main ? 90 : rScale(d.score) * 1.5).toString() + "px")
+      .style("height", d => (d.main ? 90 : rScale(d.score) * 1.5).toString() + "px")
+    
     node.append("text")
       .attr("dy", d => (d.main ? 72 : rScale(d.score) + 14))
       .text(d => truncateTitle(d.title, 75))
       .style("font-weight", d => d.main ? "700" : "500");
+
+    node.append("text")
+      .attr("dy", d => (d.main ? 88 : rScale(d.score) + 30))
+      .text(d => d.objectID)
+      .style("font-weight", d => d.main ? "700" : "500");
+
+    info.html("Dataset loaded. Search for an Object Number or Title above. Double-click a node or table entry to see similar pieces.");
 
     function ticked() {
       const pad = 200; // adds both left/right breathing room
