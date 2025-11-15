@@ -198,10 +198,11 @@ document.addEventListener("DOMContentLoaded", async function() {
       title: mainRec.title,
       main: true,
       score: 0,
-      objectID: mainKey,
+      objectNum: mainKey,
       artist: (mainRec.artist || []).join(", "),
       year: mainRec.object_date || "Unknown",
       galleryNumber: mainRec.gallery_number || "Unknown",
+      objectID: mainRec.object_id,
       imgurl: mainRec.imgurl
     }];
     const links = [];
@@ -215,10 +216,11 @@ document.addEventListener("DOMContentLoaded", async function() {
     title: targetRec.title,
     main: false,
     score: n.score,
-    objectID: targetKey,
+    objectNum: targetKey,
     artist: (targetRec.artist || []).join(", "),
     year: targetRec.object_date || "Unknown",
     galleryNumber: targetRec.gallery_number || "Unknown",
+    objectID: targetRec.object_id,
     imgurl: targetRec.imgurl
   });
   links.push({ source: mainId, target: targetRec.index, value: n.score });
@@ -229,6 +231,10 @@ document.addEventListener("DOMContentLoaded", async function() {
     similarTable.querySelector("h3").textContent = `Similar to: ${truncateTitle(mainRec.title, 40)}`;
     tableBody.innerHTML = "";
     
+    imagepreview = d3.select("#imagePreview")
+      .style("position", "absolute")
+      .style("visibility", "hidden")
+
     const similarNodes = nodes.filter(d => !d.main).sort((a, b) => b.score - a.score);
     similarNodes.forEach((node, idx) => {
       const row = document.createElement("tr");
@@ -237,8 +243,9 @@ document.addEventListener("DOMContentLoaded", async function() {
         <td class="title" title="${node.title}">${truncateTitle(node.title, 40)}</td>
         <td class="score">${node.score.toFixed(1)}</td>
       `;
-      row.addEventListener("click", () => showDetails(node));
-      row.addEventListener("dblclick", () => renderGraph(allData[node.objectID]))
+      row.addEventListener("click", () => showDetails(node))
+      row.addEventListener("dblclick", () => renderGraph(allData[node.objectNum]))
+
       tableBody.appendChild(row);
     });
 
@@ -282,17 +289,13 @@ document.addEventListener("DOMContentLoaded", async function() {
       .data(nodes).enter().append("g")
       .attr("class", "node")
       .on("click", showDetails)
-      .on("dblclick", d => renderGraph(allData[d.objectID]));
+      .on("dblclick", d => renderGraph(allData[d.objectNum]));
 
     node.append("circle")
       .attr("r", d => d.main ? 58 : rScale(d.score))
       .style("fill", d => d.main ? "#ffb4c2" : nodeColor(d.score));
 
-    imagepreview = d3.select("#imagePreview")
-      .style("position", "absolute")
-      .style("visibility", "hidden")
-
-    node.append("svg:image")
+    node.append("image")
       .attr("xlink:href", d => d.imgurl)
       .attr("x", d => d.main ? -45 : -rScale(d.score) * 0.77)
       .attr("y", d => d.main ? -45 : -rScale(d.score) * 0.77)
@@ -315,10 +318,10 @@ document.addEventListener("DOMContentLoaded", async function() {
 
     node.append("text")
       .attr("dy", d => (d.main ? 88 : rScale(d.score) + 30))
-      .text(d => d.objectID)
+      .text(d => d.objectNum)
       .style("font-weight", d => d.main ? "700" : "500");
 
-    info.html("Mouse over an image to preview it. Double-click a node or table entry to see similar pieces.");
+    info.html("Mouse over a node image to preview it. Double-click a node/table row for similar pieces.");
 
     function ticked() {
       const pad = 200; // adds both left/right breathing room
@@ -345,9 +348,9 @@ document.addEventListener("DOMContentLoaded", async function() {
       // Update table header with details
       const header = similarTable.querySelector("h3");
       header.innerHTML = `
-        <div style="font-size: 14px; font-weight: 600;">${truncateTitle(d.title, 40)}</div>
+        <div style="font-size: 14px; font-weight: 600;"><a href="${"https://www.metmuseum.org/art/collection/search/" + d.objectID}" target=_blank>${truncateTitle(d.title, 40)}</a></div>
         <div style="display: flex; gap: 12px; font-size: 12px; color: #6b7280; margin-top: 4px;">
-          <div><b>Object Number:</b> ${d.objectID}</div>
+          <div><b>Object Number:</b> ${d.objectNum}</div>
           <div><b>Artist:</b> ${d.artist || "Unknown"}</div>
           <div><b>Year:</b> ${d.year}</div>
           <div><b>Gallery:</b> ${d.galleryNumber || "Unknown"}</div>
