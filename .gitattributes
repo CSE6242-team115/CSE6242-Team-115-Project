@@ -1,3 +1,4 @@
 *.csv filter=lfs diff=lfs merge=lfs -text
 *.json filter=lfs diff=lfs merge=lfs -text
 artworksGalNumKnown.json filter=lfs diff=lfs merge=lfs -text
+assets/* filter=lfs diff=lfs merge=lfs -text
