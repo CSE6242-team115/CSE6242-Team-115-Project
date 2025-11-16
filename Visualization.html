@@ -139,10 +139,8 @@ document.addEventListener("DOMContentLoaded", async function() {
   const svg = d3.select("body").append("svg")
     .attr("width", width)
     .attr("height", height);
-  const offsetX = window.innerWidth < 1400 ? -250 : -50;
-
   const gWrapper = svg.append("g")
-    .attr("transform", `translate(${offsetX}, -120) scale(0.80)`);
+    .attr("transform", "translate(200, -120) scale(0.80)");
   const gLinks = gWrapper.append("g").attr("class", "links");
   const gNodes = gWrapper.append("g").attr("class", "nodes");
   const info = d3.select("#info");
@@ -155,6 +153,7 @@ document.addEventListener("DOMContentLoaded", async function() {
     info.html("Dataset loaded. Search for an Object Number or Title above.");
   } catch (e) {
     info.html("<b>Could not load artworksGalNumKnown.json.</b>");
+    console.log(e);
     return;
   }
 
